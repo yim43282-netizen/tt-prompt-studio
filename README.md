@@ -1,4 +1,4 @@
-# TT Prompt Studio
+# Studio
 
 基于 提示词编译器，单文件纯前端应用。
 
