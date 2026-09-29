@@ -87,15 +87,38 @@
 .plib-tag{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 9px}
 .plib-work{font-size:12px;color:var(--muted);background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:8px 11px;margin:8px 0 12px;line-height:1.55}
 @media(max-width:960px){.plib-layout{grid-template-columns:1fr}}
+
+.fx-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+.fx-grid .fx-chip{padding:9px 4px;font-size:12.5px;border-radius:10px;text-align:center}
+.plib-search-row{margin:0 0 7px}
+.plib-search-row .input{width:100%;font-size:12.5px;padding:7px 10px}
+.plib-groups{gap:5px;margin-bottom:8px}
+.plib-groups .plib-chip{padding:4px 9px;font-size:11.5px}
+.plib-list-side{max-height:34vh;overflow:auto;gap:5px}
+.plib-list-side .plib-item{padding:7px 9px}
+.plib-list-side .plib-item-name{font-size:12.5px;font-weight:600}
+.plib-list-side .plib-item-sub{display:none}
+.plib-side-foot{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.plib-side-foot .btn{padding:6px 9px;font-size:12px}
+.side-user{display:flex;align-items:center;gap:6px}
 </style>
 </head>
 <body>
 <div class="app">
 <header class="topbar"><div class="brand"><div class="logo">TT</div><div><h1>Prompt Studio</h1><p>基于 TT AI V1.7.0 的离线提示词编译器</p></div></div><div class="status-pill"><span class="dot"></span>所有数据仅在本机浏览器处理</div></header>
 <div class="layout">
-<aside class="panel sidebar"><div class="section-title">角色模板</div><div id="roleList" class="role-list"></div></aside>
+<aside class="panel sidebar">
+<div class="section-title">角色模板</div><div id="roleList" class="role-list"></div>
+<div class="section-title" style="margin-top:14px">特效</div><div id="fxPicker" class="fx-grid"></div>
+<div class="section-title" style="margin-top:14px">提示词库 <span id="plibCount" class="hint"></span></div>
+<div class="plib-search-row"><input id="plibSearch" class="input" placeholder="搜索名称"></div>
+<div id="plibGroups" class="plib-groups"></div>
+<div id="plibList" class="role-list plib-list-side"></div>
+<div class="plib-side-foot"><button id="plibNew" class="btn small" type="button">＋ 添加提示词</button><button id="plibRestore" class="btn small" type="button">恢复内置库</button></div>
+</aside>
 <main class="panel main">
-<div class="main-head"><div><h2 id="currentRoleName">默认角色</h2><div id="currentRoleMeta" class="sub"></div></div><div class="tabs"><button class="tab active" data-tab="compose">构建</button><button class="tab" data-tab="template">模板原文</button><button class="tab" data-tab="skill">原版 Skill</button><button class="tab" data-tab="desc">描写词</button><button class="tab" data-tab="fx">特效</button><button class="tab" data-tab="plib">提示词</button></div></div>
+<div class="main-head"><div><h2 id="currentRoleName">默认角色</h2><div id="currentRoleMeta" class="sub"></div></div><div class="tabs" id="roleTabs"><button class="tab active" data-tab="compose">构建</button><button class="tab" data-tab="template">模板原文</button><button class="tab" data-tab="skill">原版 Skill</button><button class="tab" data-tab="desc">描写词</button></div></div>
+<div id="rolePages">
 <section id="composePage" class="tab-page active">
 <div id="roleNotice"></div>
 <div class="field"><label>你的问题或需求 <span class="hint">作为插件中的当前用户消息</span></label><textarea id="userInput" class="textarea" placeholder="例如：保留人物动作与服装，将场景强化为雨夜霓虹街区，增强电影感和纵深……"></textarea></div>
@@ -132,9 +155,9 @@
 </div>
 </section>
 
+</div>
 <section id="fxPage" class="tab-page">
 <div class="fx-note">以下 6 段为<b>图生图 / 编辑类模型</b>（Nano Banana、GPT Image 等）的特效执行指令。滑块改的是提示词内部 <code>@param</code> 字段的数值，下方输出即为<b>可直接复制的完整提示词模板</b>；把输出内容连同原图一起发给模型即可。</div>
-<div class="fx-picker" id="fxPicker"></div>
 <div class="fx-meta" id="fxMeta"></div>
 <div class="fx-hint" id="fxHint"></div>
 <div class="card">
@@ -155,14 +178,6 @@
 
 <section id="plibPage" class="tab-page">
 <div class="fx-note">「提示词库」内置 40 条由橙AIper 提取的图生图提示词模板（按部位分组），全部走同一套 <code>@param</code> 滑块机制：选中条目 → 拖滑块 → 下方输出可直接复制的完整提示词。支持<b>搜索 / 收藏 / 添加 / 删除</b>，收藏与自定义条目保存在本机浏览器 localStorage。</div>
-<div class="plib-layout">
-<aside>
-<div class="plib-search-row"><input id="plibSearch" class="input" placeholder="搜索名称"><button id="plibNew" class="btn small primary" type="button">＋ 添加</button></div>
-<div class="plib-groups" id="plibGroups"></div>
-<div class="plib-count" id="plibCount"></div>
-<div class="plib-list" id="plibList"></div>
-<div class="plib-side-foot"><button id="plibRestore" class="btn small" type="button">恢复内置库</button></div>
-</aside>
 <div class="plib-main" id="plibMain"></div>
 </div>
 </section>
@@ -486,6 +501,32 @@ $("plibRestore").onclick=()=>{if(!plibStore.deleted.size){alert("内置库没有
 $("plibSearch").oninput=e=>{plibQuery=e.target.value;plibRenderList();};
 function renderPlib(){plibRenderGroups();plibRenderList();plibRenderDetail();}
 
+
+/* ================= 左栏导航：角色模板 / 特效 / 提示词库 → 右主区详情 ================= */
+let uiMode="role";
+function setMode(m){
+ uiMode=m;
+ const isRole=m==="role";
+ $("roleTabs").classList.toggle("hidden",!isRole);
+ $("rolePages").style.display=isRole?"":"none";
+ $("fxPage").classList.toggle("active",m==="fx");
+ $("plibPage").classList.toggle("active",m==="plib");
+}
+const _renderFx=renderFx;
+renderFx=function(){setMode("fx");_renderFx();const it=fxItem(fxCurrent);$("currentRoleName").textContent="特效 · "+it.name;$("currentRoleMeta").textContent="滑块织入 @param，输出完整提示词";};
+const _renderPlib=renderPlib;
+renderPlib=function(){setMode("plib");_renderPlib();};
+const _plibRenderDetail=plibRenderDetail;
+plibRenderDetail=function(){_plibRenderDetail();const it=plibCur();$("currentRoleName").textContent=it?("提示词 · "+it.name):"提示词库";$("currentRoleMeta").textContent=it?((PLIB_GROUP_LABELS[it.group]||it.group)+" · 内置 40 条库"):"左侧选择或添加提示词";};
+const _renderAll=renderAll;
+renderAll=function(){setMode("role");_renderAll();};
+document.addEventListener("click",(e)=>{
+ if(e.target.closest(".role")){setMode("role");return;}
+ if(e.target.closest(".fx-chip")){setMode("fx");return;}
+ if(e.target.closest(".plib-item")||e.target.closest("#plibNew")||e.target.closest("#plibSearch")||e.target.closest("#plibGroups")){setMode("plib");return;}
+},true);
+
+plibRenderGroups();plibRenderList();
 </script>
 </body>
 </html>
