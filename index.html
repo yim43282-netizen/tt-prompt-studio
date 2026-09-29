@@ -183,6 +183,28 @@
 <div class="fx-note">「提示词库」内置 40 条由橙AIper 提取的图生图提示词模板（按部位分组），全部走同一套 <code>@param</code> 滑块机制：选中条目 → 拖滑块 → 下方输出可直接复制的完整提示词。支持<b>搜索 / 收藏 / 添加 / 删除</b>，收藏与自定义条目保存在本机浏览器 localStorage。</div>
 <div class="plib-main" id="plibMain"></div>
 </div>
+
+<section id="lightPage" class="tab-page">
+<div class="fx-note">橙AIper「打光 → <b>AI打光</b>」的轨道摆灯台复刻：拖灯球选灯位（可绕到人物身后打逆光/轮廓光），滑块调距离/功率/覆盖/边缘，选光色——下方实时输出软件实际发给生图模型的 <code>Lighting-Only AOV</code> 提示词。复制后<b>连同原图</b>发给图生图模型，得到中性灰底灯光层，回 PS 置于原图上方、混合模式改<b>柔光</b>（不透明度 70-100%）即完成打光。</div>
+<div class="card">
+<div class="card-title">轨道摆灯台 <span class="hint">左键拖=摆灯位 · 右键拖=转视角 · 中键拖/滑块=灯距离 · 滚轮=推拉镜头</span></div>
+<canvas id="lightGizmo" style="width:100%;height:280px;display:block;touch-action:none;cursor:grab;border-radius:10px;background:rgba(255,255,255,0.02)"></canvas>
+<div id="lightRead" style="text-align:center;margin-top:8px"></div>
+</div>
+<div class="card">
+<div class="card-title">灯参数 <button id="lightReset" class="btn small" type="button">恢复默认</button></div>
+<div id="lightParams"></div>
+</div>
+<div class="card">
+<div class="card-title">输出的提示词模板</div>
+<div class="fx-actions">
+<button id="copyLight" class="btn primary" type="button">复制提示词</button>
+<button id="downloadLight" class="btn" type="button">下载 .txt</button>
+<span class="hint" id="lightCount"></span>
+</div>
+<pre id="lightOutput" class="fx-output"></pre>
+<div class="fx-hint" style="margin:10px 0 0">提示：本页不调用任何模型。灯在主体身后（方位绝对值&gt;90°）时提示词会自动切换为逆光规则：正面保持灰基线、轮廓边缘出亮带。</div>
+</div>
 </section>
 
 </main>
@@ -552,6 +574,171 @@ plibRenderDetail=function(){_prd2();const it=plibCur();if(it){const pre=(it.grou
 const _rplib2=renderPlib;
 renderPlib=function(){_rplib2();plibNav("compNav","comp");plibNav("lightNav","light");plibNav("ipgenNav","ipgen");};
 plibNav("compNav","comp");plibNav("lightNav","light");plibNav("ipgenNav","ipgen");
+
+/* ================= 打光 · AI打光轨道摆灯（复刻 relight.html AI 页 buildAiLightPrompt） ================= */
+const LDEF={az:-0.7,el:0.45,dist:1.3,intensity:1.0,size:1.0,shape:0,color:"#ffd2a0"};
+let LS=Object.assign({},LDEF);
+const lgv={yaw:-0.6,pitch:0.35,dist:2.6};
+const lclamp=(v,a,b)=>v<a?a:v>b?b:v;
+function lBasis(){const cy=Math.cos(lgv.yaw),sy=Math.sin(lgv.yaw),cp=Math.cos(lgv.pitch),sp=Math.sin(lgv.pitch);
+ return{fwd:{x:-sy*cp,y:-sp,z:-cy*cp},right:{x:cy,y:0,z:-sy},up:{x:-sy*sp,y:cp,z:-cy*sp}};}
+function lProject(x,y,z,W,H){const b=lBasis();
+ const vx=x*b.right.x+y*b.right.y+z*b.right.z, vy=x*b.up.x+y*b.up.y+z*b.up.z;
+ const vz=x*b.fwd.x+y*b.fwd.y+z*b.fwd.z+lgv.dist;
+ if(vz<0.15)return null;const s=Math.min(W,H)*1.15/vz;
+ return{x:W/2+vx*s,y:H/2-vy*s,vz,s};}
+function lPath(g,fn,t0,t1,n,W,H){g.beginPath();let on=false;
+ for(let i=0;i<=n;i++){const t=t0+(t1-t0)*i/n;const c=fn(t);const p=lProject(c[0],c[1],c[2],W,H);
+  if(!p){on=false;continue;}
+  if(!on){g.moveTo(p.x,p.y);on=true;}else g.lineTo(p.x,p.y);}
+ g.stroke();}
+function lightAzD(){return ((Math.round(LS.az*180/Math.PI)+180)%360+360)%360-180;}
+function lightElD(){return Math.round(LS.el*180/Math.PI);}
+function lLabel(azD,elD,d){const a=Math.abs(azD);const side=azD>=0?"右":"左";
+ const azT=a<23?"正面光":a<68?side+"前侧光":a<113?side+"侧光":a<158?side+"后侧光":"正逆光";
+ const elT=elD>55?"顶光":elD>20?"高位":elD>-20?"平光":elD>-55?"低位":"脚光";
+ const dT=d<0.55?"贴近":d<1.0?"近距":d<1.8?"中距":"远距";
+ return azT+" | "+elT+" | "+dT;}
+function drawGizmo(){
+ const cvs=$("lightGizmo");if(!cvs)return;
+ const W=cvs.width=cvs.clientWidth||600,H=cvs.height=cvs.clientHeight||280;
+ const g=cvs.getContext("2d");g.clearRect(0,0,W,H);
+ const floorY=-0.5-0.03;
+ g.strokeStyle="rgba(255,255,255,0.07)";g.lineWidth=1;
+ for(let i=-4;i<=4;i++){const t=i*0.35;
+  lPath(g,u=>[t,floorY,-1.4+u*2.8],0,1,8,W,H);
+  lPath(g,u=>[-1.4+u*2.8,floorY,t],0,1,8,W,H);}
+ const corner=(u,v)=>[-0.4+u*0.8,0.5-v*1.0,0];
+ const q4=[corner(0,0),corner(1,0),corner(1,1),corner(0,1)].map(c=>lProject(c[0],c[1],c[2],W,H));
+ if(q4.every(Boolean)){
+  g.fillStyle="rgba(255,255,255,0.06)";g.beginPath();g.moveTo(q4[0].x,q4[0].y);
+  q4.slice(1).forEach(p=>g.lineTo(p.x,p.y));g.closePath();g.fill();
+  g.strokeStyle="rgba(255,255,255,0.25)";g.stroke();
+  const oc0=lProject(0,0,0,W,H);
+  if(oc0){g.font=Math.max(12,Math.min(26,oc0.s*0.12))+"px sans-serif";g.textAlign="center";g.textBaseline="middle";g.globalAlpha=0.5;g.fillText("\u{1F4F7}",oc0.x,oc0.y);g.globalAlpha=1;}}
+ const ce=Math.cos(LS.el),rr=LS.dist*ce,gy=LS.dist*Math.sin(LS.el);
+ g.strokeStyle="rgba(96,170,255,0.45)";
+ lPath(g,t=>[rr*Math.sin(t),gy,rr*Math.cos(t)],0,Math.PI*2,56,W,H);
+ g.strokeStyle="rgba(190,130,255,0.45)";
+ lPath(g,t=>[LS.dist*Math.cos(t)*Math.sin(LS.az),LS.dist*Math.sin(t),LS.dist*Math.cos(t)*Math.cos(LS.az)],-1.45,1.45,40,W,H);
+ const gx=LS.dist*ce*Math.sin(LS.az),gz=LS.dist*ce*Math.cos(LS.az);
+ const lp=lProject(gx,gy,gz,W,H),oc=lProject(0,0,0,W,H);
+ if(lp&&oc){g.strokeStyle="#ff9f0a";g.globalAlpha=0.55;g.beginPath();g.moveTo(lp.x,lp.y);g.lineTo(oc.x,oc.y);g.stroke();g.globalAlpha=1;}
+ if(lp){const r=Math.max(4,Math.min(16,lp.s*(0.03+LS.size*0.015)));
+  g.shadowColor=LS.color;g.shadowBlur=12;g.fillStyle=LS.color;
+  g.beginPath();g.arc(lp.x,lp.y,r,0,6.2832);g.fill();g.shadowBlur=0;
+  g.fillStyle="rgba(255,255,255,0.9)";g.beginPath();g.arc(lp.x,lp.y,r*0.4,0,6.2832);g.fill();}
+ const elD=lightElD(),azD=lightAzD();
+ $("lightRead").innerHTML='<div style="font-size:17px;font-weight:700">'+lLabel(azD,elD,LS.dist)+'</div><div class="hint">方位 '+azD+'\u00B0 · 仰角 '+elD+'\u00B0 · 距离 '+LS.dist.toFixed(2)+'</div>';
+}
+/* 摆灯台交互：左键拖=灯沿轨道(数值雅可比) · 右键拖=转视角 · 中键拖=灯距离 · 滚轮=推拉镜头 */
+(function(){
+ const gizmo=$("lightGizmo");let drag=null;
+ gizmo.addEventListener("contextmenu",e=>e.preventDefault());
+ gizmo.addEventListener("pointerdown",e=>{e.preventDefault();gizmo.setPointerCapture(e.pointerId);drag={btn:e.button,sx:e.clientX,sy:e.clientY};});
+ gizmo.addEventListener("pointermove",e=>{
+  if(!drag)return;
+  const dx=e.clientX-drag.sx,dy=e.clientY-drag.sy;drag.sx=e.clientX;drag.sy=e.clientY;
+  if(drag.btn===2){lgv.yaw+=dx*0.01;lgv.pitch=lclamp(lgv.pitch+dy*0.008,-1.2,1.2);drawGizmo();}
+  else if(drag.btn===1){LS.dist=lclamp(LS.dist*(1+dy*0.006),0.25,3);lightParamsSync();drawGizmo();lightOut();}
+  else{
+   const W=gizmo.width||600,H=gizmo.height||280;
+   const pl=(a2,e2)=>{const c=Math.cos(e2);return lProject(LS.dist*c*Math.sin(a2),LS.dist*Math.sin(e2),LS.dist*c*Math.cos(a2),W,H);};
+   const EPS=0.01;
+   const p0=pl(LS.az,LS.el),pa=pl(LS.az+EPS,LS.el),pe=pl(LS.az,LS.el+EPS);
+   let dAz=dx*0.012,dEl=-dy*0.01;
+   if(p0&&pa&&pe){
+    const a11=(pa.x-p0.x)/EPS,a21=(pa.y-p0.y)/EPS,a12=(pe.x-p0.x)/EPS,a22=(pe.y-p0.y)/EPS;
+    const det=a11*a22-a12*a21;
+    if(Math.abs(det)>1e-3){dAz=(a22*dx-a12*dy)/det;dEl=(-a21*dx+a11*dy)/det;}}
+   LS.az+=lclamp(dAz,-0.25,0.25);
+   LS.el=lclamp(LS.el+lclamp(dEl,-0.25,0.25),-1.45,1.45);
+   lightParamsSync();drawGizmo();lightOut();}
+ });
+ const end=()=>{drag=null;};
+ gizmo.addEventListener("pointerup",end);gizmo.addEventListener("pointercancel",end);
+ gizmo.addEventListener("wheel",e=>{e.preventDefault();lgv.dist=lclamp(lgv.dist*(e.deltaY>0?1.07:0.93),1.2,6);drawGizmo();},{passive:false});
+})();
+function lightRGB(){return[parseInt(LS.color.slice(1,3),16)/255,parseInt(LS.color.slice(3,5),16)/255,parseInt(LS.color.slice(5,7),16)/255];}
+function lightColorName(){const[r,g,b]=lightRGB();const mx=Math.max(r,g,b),mn=Math.min(r,g,b);
+ if(mx-mn<0.08)return"中性白";let h;
+ if(mx===r)h=((g-b)/(mx-mn)+6)%6;else if(mx===g)h=(b-r)/(mx-mn)+2;else h=(r-g)/(mx-mn)+4;
+ h=h*60;
+ return h<20?"红":h<45?"暖橙":h<70?"金黄":h<160?"绿":h<200?"青":h<260?"蓝":h<320?"品红紫":"红";}
+function buildLightPrompt(){
+ const d=LS.dist,azD=lightAzD(),elD=lightElD();
+ const label=lLabel(azD,elD,d),behind=Math.abs(azD)>90;
+ const powerT=LS.intensity<0.5?"弱":LS.intensity<1?"中等":LS.intensity<1.5?"强":"极强";
+ const distT=d<0.55?"贴近·强烈局部":d<1.0?"近距":d<1.8?"中距":"远距·大面均匀";
+ const sizeT=LS.size<0.7?"窄束":LS.size<1.4?"常规覆盖":"宽泛大面";
+ const shapeT=LS.shape>0.5?"光池边缘锐利(束光筒感)":"光池边缘柔和过渡";
+ return `{
+  "scene_type": "CGI Lighting-Only AOV Pass·中性灰底纯光照能量图层(无Albedo无物体信息·柔光叠加用)",
+
+  "system_role": "你是资深CGI灯光合成师，以多通道渲染思维工作：Beauty = Albedo × Lighting。下方给出一盏虚拟灯的精确空间参数，你据此只渲染【Lighting-Only光照AOV通道】，画在中性灰底上。这张图只含光照能量信息——哪里被照到、多亮、什么光色；不含任何物体表面颜色、纹理、细节、五官、发丝、服装图案、背景内容。用户将在PS以柔光模式叠回原图。",
+
+  "灯光参数": {
+    "空间位置": "${label}——方位角${azD}\u00B0(0\u00B0=主体正前方,\u00B190\u00B0=正侧方,\u00B1180\u00B0=正后方,正值在右负值在左)，仰角${elD}\u00B0(正=高于主体俯照,负=低于主体仰照)，距离${d.toFixed(2)}(${distT})",
+    "灯在主体${behind?"后方(逆光位)":"前方"}": "光从该位置射向主体",
+    "光色": "${LS.color}(${lightColorName()})，照亮区饱和度25-50%不卡通染色",
+    "功率": "${powerT}(${LS.intensity.toFixed(2)}/2)——功率同时决定峰值亮度与覆盖范围",
+    "覆盖": "${sizeT}，${shapeT}"
+  },
+
+  "⚠️核心机制_纯光照剥离Albedo_SUPREME": "只输出光照能量数据：被光照到的表面按法线朝向与距离升出灰基线，未照到处=干净中性灰底。绝不包含物体固有色/皮肤色/发色/织物颜色/材质纹理/五官/妆容/背景内容/主体剪影。未照亮区若显出原图内容即为错误。心智模型：手电筒照向一块空的哑光灰幕，只记录光能量的亮度分布。",
+
+  "⚠️绝对亮度下限_SUPREME": "中性灰打底，每个像素≥灰基线，任何情况无例外。彩色光只把对应通道升到基线之上，绝不把任何通道压到基线之下。禁止一切隐性压暗：Albedo渗漏/阴影渲染/遮蔽压暗。",
+
+  "⚠️无可见光路_SUPREME": "禁止：可见光束/光锥/丁达尔光柱/镜头光斑/星芒/bloom光晕团/发光的灯具本体。输出只含'光打在三维表面上的照明图案'。",
+
+  "后方灯位规则": "灯在主体后方时=逆光：主体面向相机的大部分表面接收不到直射、保持灰基线；主体轮廓边缘出现明亮的轮廓光带(发丝外缘/肩线/耳廓)，半透明材质(发丝/薄衣角/耳朵)出现透光加亮；灯所在方向的背景区域获得光照能量。这是逆光AOV的正确形态。",
+
+  "几何与材质": "用原图三维几何(法线/遮挡/深度)只决定'光照到哪个面、多亮'：朝灯的面受光，被遮挡的面保持灰基线。材质只调节加亮幅度绝不注入物体色：皮肤柔和SSS、金属锐利镜面、织物宽缓滚降、头发各向异性高光带。",
+
+  "execution_order": [
+    "1.按灯光参数在三维空间中放置这盏灯",
+    "2.分析原图几何与材质(仅用于光照计算)",
+    "3.画布初始化为均匀中性灰基线",
+    "4.计算这盏灯的直射+间接反弹能量，逐像素加到基线上",
+    "5.逐像素≥基线校验、照亮区与灰底间羽化过渡",
+    "6.执行validation三检，全过才输出"
+  ],
+
+  "validation_protocol": {
+    "1_物体信息检": "把输出当没见过原图来看：能认出主体长相/穿着/背景吗？能=混入Albedo，重做。",
+    "2_基线检": "逐像素≥灰基线？有低于者重做。",
+    "3_灯位检": "亮区分布符合${label}的灯位吗？${behind?"主体正面大部分应保持灰基线、轮廓边缘亮":"朝灯面亮、背灯面保持基线"}？不符=重做。"
+  },
+
+  "negative_prompts": [
+    "无任何物体颜色纹理信息、无主体剪影、无背景内容复制",
+    "无低于灰基线的像素、无阴影生成、无压暗",
+    "无可见光束/光锥/光斑/发光灯体",
+    "无卡通高饱和染色",
+    "输出不是原图的调亮版或压暗版，是纯光照AOV"
+  ]
+}`;}
+function lightOut(){const t=buildLightPrompt();const el=$("lightOutput");if(el)el.textContent=t;
+ const c=$("lightCount");if(c)c.textContent=t.length+" 字 · 灯位："+lLabel(lightAzD(),lightElD(),LS.dist);return t;}
+function lightRenderParams(){
+ const defs=[["dist","灯距离(0.25贴近/3远距)",0.25,3,0.01],["intensity","功率(0-2)",0,2,0.01],["size","覆盖(照射大小)",0.3,2.5,0.01],["shape","光池边缘(0柔和/1锐利)",0,1,0.01]];
+ let h='<div class="fx-blank"><label>光色</label><input type="color" id="lightColor" value="'+LS.color+'" style="width:100%;height:38px;background:none;border:none;cursor:pointer"></div>';
+ defs.forEach(dd=>{h+='<div class="fx-param"><div class="fx-param-head"><span class="fx-param-name">'+dd[1]+'</span><span class="fx-val" id="lv_'+dd[0]+'">'+Number(LS[dd[0]]).toFixed(2)+'</span></div><div class="fx-slider-row"><input type="range" class="fx-slider" data-l="'+dd[0]+'" min="'+dd[2]+'" max="'+dd[3]+'" step="'+dd[4]+'" value="'+LS[dd[0]]+'"></div></div>';});
+ $("lightParams").innerHTML=h;
+ $("lightParams").querySelectorAll(".fx-slider").forEach(s=>s.oninput=()=>{LS[s.dataset.l]=Number(s.value);$("lv_"+s.dataset.l).textContent=Number(s.value).toFixed(2);drawGizmo();lightOut();});
+ $("lightColor").oninput=e=>{LS.color=e.target.value;drawGizmo();lightOut();};
+}
+function lightParamsSync(){$("lightParams").querySelectorAll(".fx-slider").forEach(s=>{s.value=LS[s.dataset.l];$("lv_"+s.dataset.l).textContent=Number(LS[s.dataset.l]).toFixed(2);});}
+function renderLight(){setMode("light");lightRenderParams();drawGizmo();lightOut();
+ $("currentRoleName").textContent="打光 · AI打光轨道摆灯";
+ $("currentRoleMeta").textContent="拖灯球摆灯位 · 输出 Lighting-Only AOV 提示词";}
+setMode=(function(orig){return function(m){orig(m);var lp=$("lightPage");if(lp)lp.classList.toggle("active",m==="light");};})(setMode);
+$("lightNav").insertAdjacentHTML("beforeend",'<button class="fx-chip" id="lightAiChip" title="AI打光 · 轨道摆灯">\u2728 AI打光·摆灯台</button>');
+$("lightAiChip").onclick=renderLight;
+$("copyLight").onclick=()=>copyText(lightOut(),$("copyLight"));
+$("downloadLight").onclick=()=>{const t=lightOut();const url=URL.createObjectURL(new Blob([t],{type:"text/plain;charset=utf-8"}));const a=document.createElement("a");a.href=url;a.download="ai_light_AOV.txt";a.click();setTimeout(()=>URL.revokeObjectURL(url),1500);};
+$("lightReset").onclick=()=>{LS=Object.assign({},LDEF);lightRenderParams();drawGizmo();lightOut();};
+
 
 </script>
 </body>
